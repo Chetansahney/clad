@@ -952,6 +952,41 @@ StmtDiff BaseForwardModeVisitor::VisitDeclRefExpr(const DeclRefExpr* DRE) {
     // Sema::BuildDeclRefExpr is responsible for adding captured fields
     // to the underlying struct of a lambda.
     if (clonedDRE->getDecl()->getDeclContext() != m_Sema.CurContext) {
+      // For captured variables inside a lambda's pushforward method,
+      // access the variable through the lambda's captured field via 'this'.
+      if (clonedDRE->refersToEnclosingVariableOrCapture()) {
+        auto* MD = dyn_cast<CXXMethodDecl>(m_Sema.CurContext);
+        if (MD && MD->getParent()->isLambda()) {
+          auto* RD = MD->getParent();
+          auto* capturedVD = clonedDRE->getDecl();
+          FieldDecl* capturedField = nullptr;
+          auto fieldIt = RD->field_begin();
+          for (const auto& capture : RD->captures()) {
+            if (fieldIt == RD->field_end())
+              break;
+            if (capture.capturesVariable() &&
+                capture.getCapturedVar() == capturedVD) {
+              capturedField = *fieldIt;
+              break;
+            }
+            ++fieldIt;
+          }
+          if (capturedField) {
+            QualType ThisTy = MD->getThisType();
+            Expr* thisExpr =
+                m_Sema.BuildCXXThisExpr(noLoc, ThisTy, /*IsImplicit=*/true);
+            auto DAP = DeclAccessPair::make(capturedField,
+                                            capturedField->getAccess());
+            auto* memberExpr = MemberExpr::Create(
+                m_Context, thisExpr, /*IsArrow=*/true, noLoc,
+                NestedNameSpecifierLoc(), noLoc, capturedField, DAP,
+                DeclarationNameInfo(capturedField->getDeclName(), noLoc),
+                /*TemplateArgs=*/nullptr, capturedField->getType(),
+                VK_LValue, OK_Ordinary, NOUR_None);
+            return StmtDiff(memberExpr, getZeroInit(clonedDRE->getType()));
+          }
+        }
+      }
       NestedNameSpecifier* NNS = DRE->getQualifier();
       auto* referencedDecl = cast<VarDecl>(clonedDRE->getDecl());
       clonedDRE = BuildDeclRef(referencedDecl, NNS);
