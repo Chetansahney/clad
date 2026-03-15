@@ -1751,7 +1751,7 @@ Expr* ReverseModeVisitor::getStdInitListSizeExpr(const Expr* E) {
 #if CLANG_VERSION_MAJOR > 16
   clang::Expr* ReverseModeVisitor::buildDerivedLambda(const LambdaExpr* LE) {
     LambdaIntroducer Intro;
-    Intro.Default = LCD_None;
+    Intro.Default = LCD_ByRef;
     Intro.Range.setBegin(noLoc);
     Intro.Range.setEnd(noLoc);
     AttributeFactory AttrFactory;
@@ -1761,8 +1761,10 @@ Expr* ReverseModeVisitor::getStdInitListSizeExpr(const Expr* E) {
 
     QualType dFnType = GetLambdaDerivativeType(LE);
 
-    auto* DC =
-        const_cast<DeclContext*>(LE->getCallOperator()->getDeclContext());
+    // Use the current (derivative) function's context as the DeclContext
+    // for the derived lambda, so that captured variables from the enclosing
+    // scope are accessible via the lambda's capture mechanism.
+    auto* DC = m_Sema.CurContext;
     llvm::SaveAndRestore<DeclContext*> SaveContext(m_Sema.CurContext);
     llvm::SaveAndRestore<FunctionDecl*> SaveDerivative(m_Derivative);
 
